@@ -423,14 +423,42 @@
     }
 
     let username;
-    try {
-      const hydroView = hovercardElement.getAttribute("data-hydro-view");
-      if (!hydroView) return;
-      const jsonData = JSON.parse(hydroView);
-      username = jsonData?.payload?.card_user_login;
-    } catch (e) {
-      console.error("Error parsing hovercard data-hydro-view:", e, hovercardElement);
-      return;
+    
+    // Check if this is a user hovercard (from user avatar hover)
+    const isUserHovercard = hovercardElement.getAttribute("aria-label") === "User Hovercard";
+    
+    if (isUserHovercard) {
+      // For user hovercards, extract username from data-hovercard-target-url
+      const targetUrl = hovercardElement.getAttribute("data-hovercard-target-url");
+      if (targetUrl) {
+        const match = targetUrl.match(/\/users\/([^\/\?]+)/);
+        if (match) {
+          username = match[1];
+        }
+      }
+      
+      // Fallback: try to find username from the link inside the hovercard
+      if (!username) {
+        const userLink = hovercardElement.querySelector('a.f5.text-bold.Link--primary[href^="/"]');
+        if (userLink) {
+          const href = userLink.getAttribute("href");
+          const match = href.match(/^\/([^\/\?]+)$/);
+          if (match) {
+            username = match[1];
+          }
+        }
+      }
+    } else {
+      // Original logic for repository hovercards
+      try {
+        const hydroView = hovercardElement.getAttribute("data-hydro-view");
+        if (!hydroView) return;
+        const jsonData = JSON.parse(hydroView);
+        username = jsonData?.payload?.card_user_login;
+      } catch (e) {
+        console.error("Error parsing hovercard data-hydro-view:", e, hovercardElement);
+        return;
+      }
     }
 
     if (!username) {
@@ -841,7 +869,7 @@
           processBoardGroupHeader(node);
 
           // Check for hovercards
-          const hovercardSelector = 'div[data-hydro-view*="user-hovercard-hover"]';
+          const hovercardSelector = 'div[data-hydro-view*="user-hovercard-hover"], div[aria-label="User Hovercard"]';
           if (node.matches(hovercardSelector)) {
             processHovercard(node);
           }
@@ -857,5 +885,5 @@
   });
 
   // Initial scan for existing hovercards on page load
-  document.querySelectorAll('div[data-hydro-view*="user-hovercard-hover"]').forEach(processHovercard);
+  document.querySelectorAll('div[data-hydro-view*="user-hovercard-hover"], div[aria-label="User Hovercard"]').forEach(processHovercard);
 })();
