@@ -519,6 +519,85 @@
     }
   }
 
+  function processUserHovercard(hovercardElement) {
+    if (hovercardElement.hasAttribute(HOVERCARD_PROCESSED_MARKER)) {
+      return;
+    }
+
+    let username;
+    // Extract username from data-hovercard-target-url attribute
+    const targetUrl = hovercardElement.getAttribute("data-hovercard-target-url");
+    if (targetUrl) {
+      const match = targetUrl.match(/\/users\/([^\/\?]+)/);
+      if (match) {
+        username = match[1];
+      }
+    }
+
+    if (!username) {
+      // console.log("No username found in user hovercard:", hovercardElement);
+      return;
+    }
+
+    const processUpdate = (userData) => {
+      if (hovercardElement.hasAttribute(HOVERCARD_PROCESSED_MARKER)) {
+        return;
+      }
+      
+      const iconUrl = chrome.runtime.getURL("icon16.png");
+
+      const newRow = document.createElement("div");
+      newRow.classList.add("d-flex", "flex-items-baseline", "f6", "mt-1", "color-fg-muted");
+      newRow.style.cursor = "pointer";
+      newRow.setAttribute('data-testid', 'ghu-user-extension-row');
+
+      const iconContainer = document.createElement('div');
+      iconContainer.classList.add("mr-1", "flex-shrink-0");
+
+      const iconImg = document.createElement('img');
+      iconImg.src = iconUrl;
+      iconImg.alt = "Extension icon";
+      iconImg.style.width = "16px";
+      iconImg.style.height = "16px";
+      iconImg.style.verticalAlign = "middle";
+
+      iconContainer.appendChild(iconImg);
+
+      const textContainer = document.createElement('span');
+      textContainer.classList.add("lh-condensed", "overflow-hidden", "no-wrap");
+      textContainer.style.textOverflow = "ellipsis";
+      textContainer.textContent = userData;
+      
+      newRow.appendChild(iconContainer);
+      newRow.appendChild(textContainer);
+
+      newRow.addEventListener("click", () => {
+        chrome.runtime.sendMessage({ type: "openOptionsPage", url: `options.html#${username}` });
+      });
+
+      // Find the content container - look for the main user info section
+      const appendTarget = hovercardElement.querySelector('.px-3.pb-3') || 
+                         hovercardElement.querySelector('div[data-view-component="true"].px-3.pb-3') ||
+                         hovercardElement.querySelector('.Popover-message > div') ||
+                         hovercardElement;
+      
+      // Check if extension row already exists
+      let existingExtensionRow = appendTarget.querySelector('img[alt="Extension icon"]');
+      if (!existingExtensionRow) {
+        appendTarget.appendChild(newRow);
+      }
+
+      hovercardElement.setAttribute(HOVERCARD_PROCESSED_MARKER, "true");
+    };
+
+    if (displayNames[username]) {
+      processUpdate(displayNames[username]);
+    } else {
+      registerElement(username, processUpdate);
+      fetchDisplayName(username);
+    }
+  }
+
   function processSingleUserGridCell(root) {
     if (!(root instanceof Element)) return;
 
@@ -846,6 +925,13 @@
             processHovercard(node);
           }
           node.querySelectorAll(hovercardSelector).forEach(processHovercard);
+
+          // Check for user hovercards (new type from feeds)
+          const userHovercardSelector = 'div.Popover.js-hovercard-content[aria-label="User Hovercard"]';
+          if (node.matches(userHovercardSelector)) {
+            processUserHovercard(node);
+          }
+          node.querySelectorAll(userHovercardSelector).forEach(processUserHovercard);
         }
       });
     }
@@ -858,4 +944,5 @@
 
   // Initial scan for existing hovercards on page load
   document.querySelectorAll('div[data-hydro-view*="user-hovercard-hover"]').forEach(processHovercard);
+  document.querySelectorAll('div.Popover.js-hovercard-content[aria-label="User Hovercard"]').forEach(processUserHovercard);
 })();
