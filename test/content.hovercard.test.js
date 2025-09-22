@@ -73,14 +73,42 @@ describe('GitHub Usernames Extension - Hovercard Functionality', () => {
       }
 
       let username;
-      try {
-        const hydroView = hovercardElement.getAttribute("data-hydro-view");
-        if (!hydroView) return;
-        const jsonData = JSON.parse(hydroView);
-        username = jsonData?.payload?.card_user_login;
-      } catch (e) {
-        console.error("Error parsing hovercard data-hydro-view:", e, hovercardElement);
-        return;
+      
+      // Check if this is a user hovercard (from user avatar hover)
+      const isUserHovercard = hovercardElement.getAttribute("aria-label") === "User Hovercard";
+      
+      if (isUserHovercard) {
+        // For user hovercards, extract username from data-hovercard-target-url
+        const targetUrl = hovercardElement.getAttribute("data-hovercard-target-url");
+        if (targetUrl) {
+          const match = targetUrl.match(/\/users\/([^\/\?]+)/);
+          if (match) {
+            username = match[1];
+          }
+        }
+        
+        // Fallback: try to find username from the link inside the hovercard
+        if (!username) {
+          const userLink = hovercardElement.querySelector('a.f5.text-bold.Link--primary[href^="/"]');
+          if (userLink) {
+            const href = userLink.getAttribute("href");
+            const match = href.match(/^\/([^\/\?]+)$/);
+            if (match) {
+              username = match[1];
+            }
+          }
+        }
+      } else {
+        // Original logic for repository hovercards
+        try {
+          const hydroView = hovercardElement.getAttribute("data-hydro-view");
+          if (!hydroView) return;
+          const jsonData = JSON.parse(hydroView);
+          username = jsonData?.payload?.card_user_login;
+        } catch (e) {
+          console.error("Error parsing hovercard data-hydro-view:", e, hovercardElement);
+          return;
+        }
       }
 
       if (!username) {
@@ -113,7 +141,7 @@ describe('GitHub Usernames Extension - Hovercard Functionality', () => {
         const textContainer = document.createElement('span');
         textContainer.classList.add("lh-condensed", "overflow-hidden", "no-wrap");
         textContainer.style.textOverflow = "ellipsis";
-        textContainer.textContent = userData.name; // Only display name
+        textContainer.textContent = userData; // Only display name
         
         newRow.appendChild(iconContainer);
         newRow.appendChild(textContainer);
@@ -182,7 +210,7 @@ describe('GitHub Usernames Extension - Hovercard Functionality', () => {
     expect(lastRegisteredCallback).toBeDefined();
 
     // Simulate fetchDisplayName resolving by calling the registered callback
-    const userData = { name: 'Test User', timestamp: new Date('2024-01-01T00:00:00.000Z').getTime(), noExpire: false };
+    const userData = 'Test User';
     lastRegisteredCallback(userData); // Directly use the captured callback
     
     const newRow = findNewRowInHovercard(hovercard);
@@ -219,7 +247,7 @@ describe('GitHub Usernames Extension - Hovercard Functionality', () => {
     processHovercard(hovercard);
     expect(lastRegisteredCallback).toBeDefined();
 
-    const userData = { name: 'Immortal User', timestamp: new Date().getTime(), noExpire: true };
+    const userData = 'Immortal User';
     lastRegisteredCallback(userData);
 
     const newRow = findNewRowInHovercard(hovercard);
@@ -232,8 +260,7 @@ describe('GitHub Usernames Extension - Hovercard Functionality', () => {
   });
 
   test('Uses data directly from displayNames cache if present', () => {
-    const cachedTime = new Date('2023-12-25T00:00:00.000Z').getTime();
-    displayNames['cacheduser'] = { name: 'Cached User', timestamp: cachedTime, noExpire: false };
+    displayNames['cacheduser'] = 'Cached User';
     
     const hovercard = createMockHovercard('cacheduser');
     processHovercard(hovercard);
@@ -252,7 +279,7 @@ describe('GitHub Usernames Extension - Hovercard Functionality', () => {
     processHovercard(hovercard);
     expect(lastRegisteredCallback).toBeDefined();
 
-    const userData = { name: 'Clickable User', timestamp: new Date().getTime(), noExpire: false };
+    const userData = 'Clickable User';
     lastRegisteredCallback(userData);
 
     const newRow = findNewRowInHovercard(hovercard);
@@ -323,4 +350,123 @@ describe('GitHub Usernames Extension - Hovercard Functionality', () => {
   // Conceptual tests for MutationObserver and initial scan would require more complex setup
   // to actually run content.js's observer/initial scan logic.
   // For now, these are covered by the fact that processHovercard itself is tested.
+
+  // Tests for User Hovercards (from user avatar hover)
+  describe('User Hovercards', () => {
+    function createMockUserHovercard(username, existingContent = '') {
+      const hovercard = document.createElement('div');
+      hovercard.setAttribute('aria-label', 'User Hovercard');
+      hovercard.setAttribute('data-hovercard-target-url', `/users/${username}/hovercard?event_type=feeds.feed_click`);
+      
+      const mainContent = document.createElement('div');
+      mainContent.className = 'px-3 pb-3';
+      mainContent.innerHTML = existingContent;
+      
+      // Add a user link inside the hovercard
+      const userLink = document.createElement('a');
+      userLink.className = 'f5 text-bold Link--primary no-underline';
+      userLink.href = `/${username}`;
+      userLink.textContent = username;
+      mainContent.appendChild(userLink);
+      
+      hovercard.appendChild(mainContent);
+      document.body.appendChild(hovercard);
+      return hovercard;
+    }
+
+    test('Processes user hovercard and extracts username from data-hovercard-target-url', () => {
+      const hovercard = createMockUserHovercard('SethRobinson');
+      processHovercard(hovercard);
+
+      expect(fetchDisplayName).toHaveBeenCalledWith('SethRobinson');
+      expect(registerElement).toHaveBeenCalledWith('SethRobinson', expect.any(Function));
+      expect(lastRegisteredCallback).toBeDefined();
+
+      // Simulate fetchDisplayName resolving
+      const userData = 'Seth Robinson';
+      lastRegisteredCallback(userData);
+      
+      const newRow = findNewRowInHovercard(hovercard);
+      expect(newRow).not.toBeNull();
+      
+      const textContainer = newRow.querySelector('span.lh-condensed');
+      expect(textContainer.textContent).toBe('Seth Robinson');
+      expect(hovercard.hasAttribute(HOVERCARD_PROCESSED_MARKER)).toBe(true);
+    });
+
+    test('Falls back to extracting username from link href if target-url parsing fails', () => {
+      const hovercard = document.createElement('div');
+      hovercard.setAttribute('aria-label', 'User Hovercard');
+      // No data-hovercard-target-url
+      
+      const mainContent = document.createElement('div');
+      mainContent.className = 'px-3 pb-3';
+      
+      // Add a user link
+      const userLink = document.createElement('a');
+      userLink.className = 'f5 text-bold Link--primary no-underline';
+      userLink.href = '/octocat';
+      userLink.textContent = 'octocat';
+      mainContent.appendChild(userLink);
+      
+      hovercard.appendChild(mainContent);
+      document.body.appendChild(hovercard);
+      
+      processHovercard(hovercard);
+
+      expect(fetchDisplayName).toHaveBeenCalledWith('octocat');
+      expect(registerElement).toHaveBeenCalledWith('octocat', expect.any(Function));
+    });
+
+    test('Does not process if aria-label is not "User Hovercard"', () => {
+      const hovercard = document.createElement('div');
+      hovercard.setAttribute('aria-label', 'Repository Hovercard');
+      hovercard.setAttribute('data-hovercard-target-url', '/users/testuser/hovercard');
+      
+      const mainContent = document.createElement('div');
+      mainContent.className = 'px-3 pb-3';
+      hovercard.appendChild(mainContent);
+      document.body.appendChild(hovercard);
+      
+      processHovercard(hovercard);
+
+      expect(fetchDisplayName).not.toHaveBeenCalled();
+      expect(registerElement).not.toHaveBeenCalled();
+    });
+
+    test('Handles user hovercards with complex URLs', () => {
+      const hovercard = createMockUserHovercard('user-with-dash');
+      hovercard.setAttribute('data-hovercard-target-url', 
+        '/users/user-with-dash/hovercard?event_type=feeds.feed_click&payload[feed_card][card_position]=0&payload[metadata][clicked_resource_id]=394547');
+      
+      processHovercard(hovercard);
+
+      expect(fetchDisplayName).toHaveBeenCalledWith('user-with-dash');
+      expect(registerElement).toHaveBeenCalledWith('user-with-dash', expect.any(Function));
+    });
+
+    test('Does not process user hovercard if already processed', () => {
+      const hovercard = createMockUserHovercard('processeduser');
+      hovercard.setAttribute(HOVERCARD_PROCESSED_MARKER, 'true');
+      
+      processHovercard(hovercard);
+
+      expect(fetchDisplayName).not.toHaveBeenCalled();
+      expect(registerElement).not.toHaveBeenCalled();
+    });
+
+    test('Uses cached display name for user hovercards', () => {
+      displayNames['cacheduser'] = 'Cached User Name';
+      
+      const hovercard = createMockUserHovercard('cacheduser');
+      processHovercard(hovercard);
+
+      const newRow = findNewRowInHovercard(hovercard);
+      expect(newRow).not.toBeNull();
+      const textContainer = newRow.querySelector('span.lh-condensed');
+      expect(textContainer.textContent).toBe('Cached User Name');
+      expect(fetchDisplayName).not.toHaveBeenCalledWith('cacheduser');
+      expect(registerElement).not.toHaveBeenCalledWith('cacheduser', expect.any(Function));
+    });
+  });
 });
